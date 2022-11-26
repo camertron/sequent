@@ -1,0 +1,26 @@
+[package]
+name = "sequent"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+bytes = "1.3.0"
+clap = { version = "4.0.27", features = ["derive"] }
+log = { version = "0.4.17", features = ["kv_unstable"] }
+rmp-serde = "1.1.1"
+serde = { version = "1.0.147", features = ["derive"] }
+simplelog = { version = "0.12.0", features = ["paris"] }
+sqlite = "0.30.2"
+zmq = "0.9"
+
+[build-dependencies]
+built = "0.5"
+
+[[bin]]
+name = "sequent-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "sequent"
+path = "src/bin/client.rs"
