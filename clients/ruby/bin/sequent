@@ -1,0 +1,57 @@
+#! /usr/bin/env ruby
+
+require 'sequent'
+require 'optparse'
+require 'uri'
+
+options = {
+  host: Sequent::Client::DEFAULT_HOST,
+  port: Sequent::Client::DEFAULT_PORT
+}
+
+OptionParser.new do |parser|
+  parser.banner = "Usage: sequent [options]"
+
+  parser.on('-H', '--host HOST', 'The host the Sequent server is running on.') do |host|
+    options[:host] = host
+  end
+
+  parser.on('-p', '--port PORT', 'The port the Sequent server is running on.') do |port|
+    options[:port] = port
+  end
+
+  parser.on('-q', '--query QUERY', 'The SQL query to execute.') do |query|
+    options[:query] = query
+  end
+
+  parser.on('-h', '--help', 'Prints this help') do
+    puts parser
+    exit
+  end
+end.parse!
+
+unless options[:query]
+  fail 'No query provided'
+end
+
+client = Sequent::Client.new(options[:host], options[:port])
+result = client.exec_query(options[:query])
+
+longest = []
+
+result.rows.each do |row|
+  row.each_with_index do |col, idx|
+    col = col.to_s
+    longest[idx] ||= 0
+    longest[idx] = col.size if col.size > longest[idx]
+  end
+end
+
+result.rows.each do |row|
+  row.each_with_index do |col, idx|
+    STDOUT.write('|') if idx > 0
+    STDOUT.write(col.to_s.ljust(longest[idx], ' '))
+  end
+
+  puts
+end

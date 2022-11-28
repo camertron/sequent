@@ -1,9 +1,9 @@
+use bytes::{BytesMut, BufMut};
 use clap::{ArgAction, Parser};
 use log::{LevelFilter, debug, info, error};
-use std::collections::LinkedList;
 use std::process::exit;
-use sequent::{DEFAULT_PORT, ValueWrapper, QueryResultRow, QueryResult};
-use sequent::build_info::{PKG_VERSION};
+use sequent::DEFAULT_PORT;
+use sequent::build_info::PKG_VERSION;
 use sqlite;
 use sqlite::Value;
 use zmq;
@@ -86,29 +86,60 @@ fn main() {
         info!("QUERY: {}", query);
 
         let mut cursor = statement.into_iter();
-        let mut result_rows: LinkedList<QueryResultRow> = LinkedList::new();
+        let mut row_results = BytesMut::new();
+        let mut row_count: u64 = 0;
 
         while let Some(Ok(row)) = cursor.next() {
             let values: Vec<Value> = row.into();
-            let mut wrapped_values: Vec<ValueWrapper> = Vec::with_capacity(values.len());
 
             for value in values {
-                wrapped_values.push(ValueWrapper(value));
+                match value {
+                    Value::Null => {
+                        row_results.put_u8(0);
+                    }
+
+                    Value::Integer(i) => {
+                        row_results.put_u8(1);
+                        row_results.put_i64(i);
+                    }
+
+                    Value::Float(f) => {
+                        row_results.put_u8(2);
+                        row_results.put_f64(f);
+                    }
+
+                    Value::String(str) => {
+                        row_results.put_u8(3);
+                        let bytes = str.as_bytes();
+                        row_results.put_u64(bytes.len() as u64);
+                        row_results.put_slice(bytes);
+                    }
+
+                    Value::Binary(bytes) => {
+                        row_results.put_u8(4);
+                        row_results.put_u64(bytes.len() as u64);
+                        row_results.put_slice(bytes.as_slice());
+                    }
+                }
             }
 
-            result_rows.push_back(wrapped_values);
+            row_count += 1;
         }
 
-        let result = QueryResult {
-            columns: cursor.column_names().to_vec(),
-            column_count: cursor.column_count(),
-            rows: result_rows.into_iter().collect()
-        };
+        let column_names = cursor.column_names();
+        let mut header = BytesMut::new();
 
-        let buf = rmp_serde::to_vec(&result).unwrap();
+        header.put_slice(&b"SQNT"[..]);
+        header.put_u64(row_count);
+        header.put_u64(column_names.len() as u64);
 
-        match socket.send(buf, 0) {
-            Ok(_) => info!("Sent {} row(s) to client", result.rows.len()),
+        for column_name in column_names {
+            header.put_u64(column_name.len() as u64);
+            header.put_slice(column_name.as_bytes());
+        }
+
+        match socket.send_multipart([header.to_vec(), row_results.to_vec()], 0) {
+            Ok(_) => info!("Sent {} row(s) to client", row_count),
             Err(e) => error!("Error sending rows to client: {}", e)
         }
     }

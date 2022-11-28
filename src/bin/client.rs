@@ -1,10 +1,10 @@
 extern crate sequent;
 
+use bytes::{BytesMut, Buf};
 use clap::{Parser};
-use sequent::{DEFAULT_PORT, QueryResult};
+use sequent::{DEFAULT_PORT, QueryResult, QueryResultHeader};
 use sqlite::Value;
-use std::ops::Deref;
-use zmq;
+use std::process::exit;
 
 #[derive(Parser)]
 #[command(author="Cameron C. Dutro")]
@@ -28,15 +28,90 @@ fn main() {
     socket.connect(format!("tcp://{}", options.host).as_str()).unwrap();
     socket.send(&options.query, 0).unwrap();
 
-    let message = socket.recv_msg(0).unwrap();
-    let message_bytes = message.deref();
-    let results = rmp_serde::from_slice::<QueryResult>(&message_bytes).unwrap();
-    let mut longest = vec![0; results.column_count];
+    let message_parts = socket.recv_multipart(0).unwrap();
+    let header = deserialize_header(&message_parts[0]);
+    let rows = deserialize_rows(&message_parts[1], &header);
+    let result = QueryResult { header: header, rows: rows };
 
-    // for row in results.rows {
-    let row_strings = results.rows.iter().map(|row| {
+    print_result(&result);
+}
+
+fn deserialize_header(bytes: &Vec<u8>) -> QueryResultHeader {
+    let mut message = BytesMut::from(bytes.as_slice());
+
+    match message.get(0..4) {
+        Some(b"SQNT") => message.advance(4),
+        _ => {
+            println!("Malformed response from server");
+            exit(1);
+        }
+    }
+
+    let row_count = message.get_u64();
+    let column_count = message.get_u64();
+    let mut column_names = Vec::with_capacity(column_count as usize);
+
+    for _ in 0..column_count {
+        let len = message.get_u64() as usize;
+        let name = message.get(0..len).unwrap();
+        column_names.push(String::from_utf8(name.to_vec()).unwrap());
+        message.advance(len);
+    }
+
+    QueryResultHeader {
+        row_count: row_count as usize,
+        column_count: column_count as usize,
+        columns: column_names
+    }
+}
+
+fn deserialize_rows(bytes: &Vec<u8>, header: &QueryResultHeader) -> Vec<Vec<Value>> {
+    let mut message = BytesMut::from(bytes.as_slice());
+    let mut rows: Vec<Vec<Value>> = Vec::with_capacity(header.row_count);
+
+    for _ in 0..header.row_count {
+        let mut row: Vec<Value> = Vec::with_capacity(header.column_count);
+
+        for _ in 0..header.column_count {
+            let val = match message.get_u8() {
+                0 => Value::Null,
+                1 => Value::Integer(message.get_i64()),
+                2 => Value::Float(message.get_f64()),
+                3 => {
+                    let len = message.get_u64() as usize;
+                    let str = message.get(0..len).unwrap();
+                    let val = Value::String(String::from_utf8(str.to_vec()).unwrap());
+                    message.advance(len);
+                    val
+                }
+                4 => {
+                    let len = message.get_u64() as usize;
+                    let bytes = message.get(0..len).unwrap();
+                    let val = Value::Binary(bytes.to_vec());
+                    message.advance(len);
+                    val
+                }
+                _ => {
+                    println!("Malformed response from server");
+                    exit(1);
+                }
+            };
+
+            row.push(val);
+        }
+
+        rows.push(row);
+    }
+
+    rows
+}
+
+fn print_result(result: &QueryResult) {
+    let mut longest = vec![0; result.header.column_count];
+
+    let row_strings = result.rows.iter().map(|row| {
         row.iter().enumerate().map(|(column_index, value)| {
-            let value_str = match &value.0 {
+            let value_str = match &value {
                 Value::String(str) => str.clone(),
                 Value::Binary(bytes) => String::from_utf8(bytes.to_vec()).unwrap(),
                 Value::Float(f) => format!("{}", f),
