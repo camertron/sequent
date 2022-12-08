@@ -1,7 +1,12 @@
 use bytes::{BytesMut, BufMut};
 use clap::{ArgAction, Parser};
 use log::{LevelFilter, debug, info, error};
+use signal_hook::consts::TERM_SIGNALS;
 use std::process::exit;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
 use sequent::DEFAULT_PORT;
 use sequent::build_info::PKG_VERSION;
 use sqlite;
@@ -57,11 +62,17 @@ fn main() {
 
     let mut msg = zmq::Message::new();
 
-    loop {
+    let term = Arc::new(AtomicBool::new(false));
+
+    for sig in TERM_SIGNALS {
+        signal_hook::flag::register(*sig, Arc::clone(&term)).unwrap();
+    }
+
+    while !term.load(Ordering::Relaxed) {
         debug!("Waiting for message");
 
-        if let Err(e) = socket.recv(&mut msg, 0) {
-            error!("Error when attempting to receive message: {}", e);
+        if socket.recv(&mut msg, zmq::DONTWAIT).is_err() {
+            thread::sleep(Duration::from_millis(1));
             continue;
         }
 
