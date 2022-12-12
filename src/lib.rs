@@ -3,7 +3,7 @@ use sqlite::Value;
 pub mod build_info {
     // The file has been placed there by the build script.
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
- }
+}
 
  #[derive(Debug)]
  pub struct QueryResultHeader {

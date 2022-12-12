@@ -1,5 +1,6 @@
 use bytes::{BytesMut, BufMut};
 use clap::{ArgAction, Parser};
+use lazy_static::lazy_static;
 use log::{LevelFilter, debug, info, error};
 use signal_hook::consts::TERM_SIGNALS;
 use std::process::exit;
@@ -11,7 +12,7 @@ use sequent::DEFAULT_PORT;
 use sequent::build_info::PKG_VERSION;
 use sqlite;
 use sqlite::Value;
-use zmq;
+use zmq::{self, Socket};
 
 #[derive(Parser, Debug)]
 #[command(author="Cameron C. Dutro")]
@@ -27,6 +28,16 @@ struct CLI {
 
     #[arg(long=None, short='v', help="Enable verbose logging.", action = ArgAction::Count)]
     log_level: Option<u8>
+}
+
+const WAIT_TIME: Duration = Duration::from_millis(1);
+
+lazy_static! {
+    static ref EMPTY_RESPONSE: Vec<u8> = {
+        let mut data = b"SQNT".to_vec();
+        data.extend(&[0; 8][..]);
+        data
+    };
 }
 
 fn main() {
@@ -72,7 +83,7 @@ fn main() {
         debug!("Waiting for message");
 
         if socket.recv(&mut msg, zmq::DONTWAIT).is_err() {
-            thread::sleep(Duration::from_millis(1));
+            thread::sleep(WAIT_TIME);
             continue;
         }
 
@@ -82,6 +93,7 @@ fn main() {
             Some(q) => q,
             None => {
                 error!("Received query that was not valid utf-8 text");
+                send_empty_response(&socket);
                 continue;
             }
         };
@@ -90,6 +102,7 @@ fn main() {
             Ok(s) => s,
             Err(e) => {
                 error!("Error preparing SQL statement: {}", e);
+                send_empty_response(&socket);
                 continue;
             }
         };
@@ -153,5 +166,12 @@ fn main() {
             Ok(_) => info!("Sent {} row(s) to client", row_count),
             Err(e) => error!("Error sending rows to client: {}", e)
         }
+    }
+
+    fn send_empty_response(socket: &Socket) {
+        match socket.send(EMPTY_RESPONSE.to_vec(), 0) {
+            Ok(_) => info!("Sent empty response to client"),
+            Err(e) => error!("Error sending empty response to client: {}", e)
+        };
     }
 }
