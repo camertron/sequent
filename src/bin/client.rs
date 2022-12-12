@@ -30,7 +30,13 @@ fn main() {
 
     let message_parts = socket.recv_multipart(0).unwrap();
     let header = deserialize_header(&message_parts[0]);
-    let rows = deserialize_rows(&message_parts[1], &header);
+
+    let rows = if message_parts.len() > 1 {
+        deserialize_rows(&message_parts[1], &header)
+    } else {
+        vec![]
+    };
+
     let result = QueryResult { header: header, rows: rows };
 
     print_result(&result);
@@ -107,6 +113,11 @@ fn deserialize_rows(bytes: &Vec<u8>, header: &QueryResultHeader) -> Vec<Vec<Valu
 }
 
 fn print_result(result: &QueryResult) {
+    if result.header.row_count == 0 {
+        println!("(empty result set)");
+        return;
+    }
+
     let mut longest = vec![0; result.header.column_count];
 
     let row_strings = result.rows.iter().map(|row| {

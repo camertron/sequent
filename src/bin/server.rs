@@ -34,8 +34,11 @@ const WAIT_TIME: Duration = Duration::from_millis(1);
 
 lazy_static! {
     static ref EMPTY_RESPONSE: Vec<u8> = {
+        // magic value
         let mut data = b"SQNT".to_vec();
-        data.extend(&[0; 8][..]);
+
+        // two 64-bit zeroes for num rows and column count
+        data.extend(&[0; 16][..]);
         data
     };
 }
