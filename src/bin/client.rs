@@ -1,7 +1,7 @@
 extern crate sequent;
 
 use bytes::{BytesMut, Buf};
-use clap::{Parser};
+use clap::Parser;
 use sequent::{DEFAULT_PORT, QueryResult, QueryResultHeader};
 use sqlite::Value;
 use std::process::exit;
